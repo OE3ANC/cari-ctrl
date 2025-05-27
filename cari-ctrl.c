@@ -13,9 +13,16 @@
 
 uint8_t rep_buff[1024];
 
-//config
+//connection config
 struct re_config_t
 {
+    char my_addr[128];
+    char re_addr[128];
+} config;
+
+//subdevice config
+#define MAX_SUBDEVICES 256  
+struct re_configs_t {
     uint64_t rx_freq;
     uint64_t tx_freq;
     float tx_freq_corr;
@@ -23,9 +30,10 @@ struct re_config_t
     float tx_pwr;
     int8_t afc;
     int8_t rx_ena;
-    char my_addr[128];
-    char re_addr[128];
-} config;
+} configs[MAX_SUBDEVICES];
+int current_subdev = 0;
+bool subdev_configured[MAX_SUBDEVICES] = {false}; 
+
 
 //debug printf
 void dbg_print(const char* color_code, const char* fmt, ...)
@@ -80,15 +88,19 @@ int main(int argc, char *argv[])
     uint8_t get_ident = 0;
 
     // Initialize default values
-    config.tx_pwr = -10.0f;
-    config.rx_freq_corr = -10000.0; // normal range is about -50..+50
-    config.tx_freq_corr = -10000.0;
-    config.rx_ena = -1;
-    config.afc = -1;
-    config.rx_freq = 0;
-    config.tx_freq = 0;
     memset(config.my_addr, 0, sizeof(config.my_addr));
     memset(config.re_addr, 0, sizeof(config.re_addr));
+
+    // Initialize default values for all subdevices
+    for (int i = 0; i < MAX_SUBDEVICES; i++) {
+        configs[i].tx_pwr = -10.0f;
+        configs[i].rx_freq_corr = -10000.0;
+        configs[i].tx_freq_corr = -10000.0;
+        configs[i].rx_ena = -1;
+        configs[i].afc = -1;
+        configs[i].rx_freq = 0;
+        configs[i].tx_freq = 0;
+    }
 
     // Define the long options
     static struct option long_options[] =
@@ -104,6 +116,7 @@ int main(int argc, char *argv[])
         {"tcorr",   required_argument, 0, 'C'},
         {"afc",     required_argument, 0, 'a'},
         {"rx",      required_argument, 0, 'R'},
+        {"subdev",  required_argument, 0, 'S'},
         {"help",    no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -156,69 +169,80 @@ int main(int argc, char *argv[])
                 break;
 
             case 'p': // RF power
-                config.tx_pwr = atof(optarg);
-                if(config.tx_pwr < 0.0f || config.tx_pwr > 47.75f) {
+                configs[current_subdev].tx_pwr = atof(optarg);
+                if(configs[current_subdev].tx_pwr < 0.0f || configs[current_subdev].tx_pwr > 47.75f) {
                     dbg_print(TERM_RED, "Invalid TX power\nExiting\n");
                     return 1;
                 }
                 dbg_print(0, "TX power: ");
-                dbg_print(TERM_GREEN, "%2.2f dBm\n", config.tx_pwr);
+                dbg_print(TERM_GREEN, "%2.2f dBm\n", configs[current_subdev].tx_pwr);
                 break;
 
             case 'f': // --rf (RX frequency)
-                config.rx_freq = atoi(optarg);
-                if(config.rx_freq < 420000000U || config.rx_freq > 450000000U) {
+                configs[current_subdev].rx_freq = atoi(optarg);
+                if(configs[current_subdev].rx_freq < 420000000U || configs[current_subdev].rx_freq > 450000000U) {
                     dbg_print(TERM_RED, "Invalid RX frequency\nExiting\n");
                     return 1;
                 }
                 dbg_print(0, "RX frequency: ");
-                dbg_print(TERM_GREEN, "%lu Hz\n", config.rx_freq);
+                dbg_print(TERM_GREEN, "%lu Hz\n", configs[current_subdev].rx_freq);
                 break;
 
             case 'F': // --tf (TX frequency)
-                config.tx_freq = atoi(optarg);
-                if(config.tx_freq < 420000000U || config.tx_freq > 450000000U) {
+                configs[current_subdev].tx_freq = atoi(optarg);
+                if(configs[current_subdev].tx_freq < 420000000U || configs[current_subdev].tx_freq > 450000000U) {
                     dbg_print(TERM_RED, "Invalid TX frequency\nExiting\n");
                     return 1;
                 }
                 dbg_print(0, "TX frequency: ");
-                dbg_print(TERM_GREEN, "%lu Hz\n", config.tx_freq);
+                dbg_print(TERM_GREEN, "%lu Hz\n", configs[current_subdev].tx_freq);
                 break;
 
             case 'c': // --rc (RX frequency correction)
-                config.rx_freq_corr = atof(optarg);
-                if(config.rx_freq_corr < -100.0f || config.rx_freq_corr > 100.0f) {
-                    dbg_print(TERM_YELLOW, "RX frequency correction of %3.1fppm seems large\n", config.rx_freq_corr);
+                configs[current_subdev].rx_freq_corr = atof(optarg);
+                if(configs[current_subdev].rx_freq_corr < -100.0f || configs[current_subdev].rx_freq_corr > 100.0f) {
+                    dbg_print(TERM_YELLOW, "RX frequency correction of %3.1fppm seems large\n", configs[current_subdev].rx_freq_corr);
                 }
                 dbg_print(0, "RX frequency correction: ");
-                dbg_print(TERM_GREEN, "%3.1f ppm\n", config.rx_freq_corr);
+                dbg_print(TERM_GREEN, "%3.1f ppm\n", configs[current_subdev].rx_freq_corr);
                 break;
 
             case 'C': // --tc (TX frequency correction)
-                config.tx_freq_corr = atof(optarg);
-                if(config.tx_freq_corr < -100.0f || config.tx_freq_corr > 100.0f) {
-                    dbg_print(TERM_YELLOW, "TX frequency correction of %3.1fppm seems large\n", config.tx_freq_corr);
+                configs[current_subdev].tx_freq_corr = atof(optarg);
+                if(configs[current_subdev].tx_freq_corr < -100.0f || configs[current_subdev].tx_freq_corr > 100.0f) {
+                    dbg_print(TERM_YELLOW, "TX frequency correction of %3.1fppm seems large\n", configs[current_subdev].tx_freq_corr);
                 }
                 dbg_print(0, "TX frequency correction: ");
-                dbg_print(TERM_GREEN, "%3.1f ppm\n", config.tx_freq_corr);
+                dbg_print(TERM_GREEN, "%3.1f ppm\n", configs[current_subdev].tx_freq_corr);
                 break;
 
             case 'a': // --afc
-                config.afc = (optarg[0] == '0') ? 0 : 1;
+                configs[current_subdev].afc = (optarg[0] == '0') ? 0 : 1;
                 dbg_print(0, "AFC: ");
-                if(config.afc)
+                if(configs[current_subdev].afc)
                     dbg_print(TERM_GREEN, "enabled\n");
                 else
                     dbg_print(TERM_GREEN, "disabled\n");
                 break;
 
             case 'R': // --rx
-                config.rx_ena = (optarg[0] == '0') ? 0 : 1;
+                configs[current_subdev].rx_ena = (optarg[0] == '0') ? 0 : 1;
                 dbg_print(0, "RX: ");
-                if(config.rx_ena)
+                if(configs[current_subdev].rx_ena)
                     dbg_print(TERM_GREEN, "enabled\n");
                 else
                     dbg_print(TERM_GREEN, "disabled\n");
+                break;
+
+            case 'S': // --subdev
+                current_subdev = atoi(optarg);
+                if (current_subdev < 0 || current_subdev >= MAX_SUBDEVICES) {
+                    dbg_print(TERM_RED, "Invalid subdevice index (must be 0-%d)\nExiting\n", MAX_SUBDEVICES-1);
+                    return 1;
+                }
+                subdev_configured[current_subdev] = true;
+                dbg_print(0, "Configuring subdevice: ");
+                dbg_print(TERM_GREEN, "%d\n", current_subdev);
                 break;
 
             case 'h': // Help
