@@ -30,6 +30,7 @@ struct re_configs_t {
     float tx_pwr;
     int8_t afc;
     int8_t rx_ena;
+    uint16_t dlport;
 } configs[MAX_SUBDEVICES];
 int current_subdev = 0;
 bool subdev_configured[MAX_SUBDEVICES] = {false}; 
@@ -63,7 +64,7 @@ void print_help(const char *program_name) {
     printf("Required options:\n");
 	printf("  -d, --dest=ADDR       Destination (RRU) IP and port (for the control channel)\n");
 	printf("                        This is the address of the Remote Radio Unit (RRU), with port set with `--ctrl` argument.\n");
-    printf("  -s, --source=ADDR     Source (BBU) IP and port (for baseband uplink)\n");
+    printf("  -s, --source=ADDR     Source (BBU) IP (for baseband uplink)\n");
 	printf("                        This is the address of the ZMQ baseband publisher, running at the Baseband Unit (BBU).\n");
 	printf("\n");
     printf("Optional options:\n");
@@ -76,6 +77,8 @@ void print_help(const char *program_name) {
     printf("  -C, --tc=PPM          TX frequency correction in ppm as a decimal number (-100.0 to 100.0)\n");
     printf("  -a, --afc=ENABLE      Automatic Frequency Control (where available), 1-on, 0-off\n");
     printf("  -R, --rx=ENABLE       Activate RX baseband downstream, 1-on, 0-off\n");
+    printf("  -S, --subdev=ID       Subdevice ID (0-255)\n");
+    printf("  -D, --dlport=ID       Source (BBU) Port (for subdevice baseband uplink)\n");
     printf("  -h, --help            Display this help message and exit\n");
     printf("\n");
     printf("Example:\n");
@@ -117,6 +120,7 @@ int main(int argc, char *argv[])
         {"afc",     required_argument, 0, 'a'},
         {"rx",      required_argument, 0, 'R'},
         {"subdev",  required_argument, 0, 'S'},
+        {"dlport",  required_argument, 0, 'D'},
         {"help",    no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -147,12 +151,12 @@ int main(int argc, char *argv[])
                 break;
 
             case 's': // local PUB address
-                if (strlen(optarg) > 0 && strlen(optarg) < sizeof(config.my_addr)) {
+                if (strlen(optarg) > 0 && strlen(optarg) < sizeof(config.my_addr) && strchr(optarg, ':') == NULL) {
                     strcpy(config.my_addr, optarg);
                     dbg_print(0, "Local PUB address: ");
                     dbg_print(TERM_GREEN, "%s\n", config.my_addr);
                 } else {
-                    dbg_print(TERM_RED, "Invalid local address length.\nExiting.\n");
+                    dbg_print(TERM_RED, "Invalid local address length or address with port.\nExiting.\n");
                     return 1;
                 }
                 break;
@@ -243,6 +247,16 @@ int main(int argc, char *argv[])
                 subdev_configured[current_subdev] = true;
                 dbg_print(0, "Configuring subdevice: ");
                 dbg_print(TERM_GREEN, "%d\n", current_subdev);
+                break;
+
+            case 'D': // --dlport
+                configs[current_subdev].dlport = atoi(optarg);
+                if(configs[current_subdev].dlport < 1 || configs[current_subdev].dlport >= 65535 ) {
+                    dbg_print(TERM_RED, "Invalid downlink port\nExiting\n");
+                    return 1;
+                }
+                dbg_print(0, "Downlink port: ");
+                dbg_print(TERM_GREEN, "%u\n", configs[current_subdev].dlport);
                 break;
 
             case 'h': // Help
